@@ -70,6 +70,12 @@
 		    <artifactId>langchain4j-ollama-spring-boot-starter</artifactId>
 		    <version>0.35.0</version>
 		</dependency>
+		
+		<!-- Dependencia para enviar correos -->
+		<dependency>
+		    <groupId>org.springframework.boot</groupId>
+		    <artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
 	</dependencies>
 
 	<build>

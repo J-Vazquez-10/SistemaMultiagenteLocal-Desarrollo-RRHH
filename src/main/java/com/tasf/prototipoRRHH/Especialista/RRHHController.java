@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/rrhh")
@@ -17,6 +18,8 @@ public class RRHHController {
     public String resolverPeticion(@RequestBody String prompt) {
         System.out.println("[MICROSERVICIO RRHH] Petición recibida");
         
-        return agente.evaluar(prompt);
+        String idTemporal = UUID.randomUUID().toString();
+        
+        return agente.evaluar(idTemporal, prompt);
     }
 }

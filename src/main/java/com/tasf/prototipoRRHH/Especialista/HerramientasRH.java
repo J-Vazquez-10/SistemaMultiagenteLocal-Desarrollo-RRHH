@@ -2,7 +2,12 @@ package com.tasf.prototipoRRHH.Especialista;
 
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
+
+import java.util.concurrent.TimeUnit;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,7 +16,11 @@ import java.nio.file.Paths;
 @Component
 public class HerramientasRH {
 	
-	// ==========================================
+    // Inyección del servicio de correos de Spring Boot
+    @Autowired
+    private JavaMailSender mailSender;
+
+    // ==========================================
     // HERRAMIENTAS EXPUESTAS AL AGENTE (LLM)
     // ==========================================
 
@@ -19,6 +28,7 @@ public class HerramientasRH {
     private static final String DIRECTORIO_RAIZ = System.getProperty("user.dir");
     private static final String CARPETA_POLITICAS = "Politicas";
     private static final String CARPETA_CANDIDATOS = "candidatos";
+    private static final String CARPETA_CONTACTOS = "Contactos";
 
 
     @Tool("Consulta las políticas internas, manuales o normativas de la empresa. Úsalo SIEMPRE que te pregunten sobre reglas.")
@@ -51,7 +61,7 @@ public class HerramientasRH {
                 return "[Error] La carpeta de candidatos no existe.";
             }
 
-            // Recorremos la carpeta y delegamos la lectura de CADA archivo al método maestro
+
             Files.list(rutaDirectorio)
                  .filter(Files::isRegularFile)
                  .forEach(archivo -> {
@@ -70,6 +80,100 @@ public class HerramientasRH {
         } catch (Exception e) {
             return "[Error al escanear directorio] " + e.getMessage();
         }
+    }
+
+    @Tool("Útil EXCLUSIVAMENTE para enviar correos electrónicos a empleados o candidatos. DEBES redactar el mensaje completo. TIENES PROHIBIDO usar textos de relleno.")
+    public String enviarCorreo(
+            @P("Dirección de correo electrónico del destinatario") String destinatario,
+            @P("Asunto corto y descriptivo del correo") String asunto,
+            @P("Cuerpo completo del mensaje. NO USES CORCHETES ni frases como 'insertar resumen'.") String cuerpo) {
+        
+    	// --- INICIO DE LA VALIDACIÓN DEFENSIVA EQUILIBRADA ---
+        String cuerpoMinusculas = cuerpo.toLowerCase();
+        
+        boolean tieneMarcadores = cuerpo.contains("[") || cuerpo.contains("]") || cuerpo.contains("<") || cuerpo.contains(">");
+        boolean tieneFrasesTrampa = cuerpoMinusculas.contains("insertar") || 
+                                    cuerpoMinusculas.contains("resumen del currículum leído") ||
+                                    cuerpoMinusculas.equals("resumen del currículum") ||
+                                    cuerpoMinusculas.contains("texto de relleno");
+
+        if (tieneMarcadores || tieneFrasesTrampa) { 
+            
+            System.out.println("⚠️ [INTERVENCIÓN] El modelo intentó usar texto de relleno: " + cuerpo);
+            return "Fallo interno: Estás intentando usar un texto de relleno. " +
+                   "Por favor, invoca primero la herramienta para leer el documento, analiza su contenido, " +
+                   "y luego vuelve a llamar a esta herramienta de correo redactando el texto real y completo.";
+        }
+        // --- FIN DE LA VALIDACIÓN DEFENSIVA EQUILIBRADA ---
+
+        System.out.println("⚡ [TOOL CALLING RRHH] Preparando envío de correo a: " + destinatario);
+        
+        try {
+            SimpleMailMessage mensaje = new SimpleMailMessage();
+            mensaje.setTo(destinatario);
+            mensaje.setSubject(asunto);
+            mensaje.setText(cuerpo);
+            
+            mailSender.send(mensaje);
+            
+            System.out.println("✅ [HERRAMIENTA RRHH] Correo enviado exitosamente a Mailtrap.");
+            return "El correo electrónico fue enviado exitosamente a " + destinatario + " con el asunto: '" + asunto + "'.";
+            
+        } catch (Exception e) {
+            System.out.println("❌ [HERRAMIENTA RRHH] Error al enviar el correo: " + e.getMessage());
+            return "Fallo al enviar el correo electrónico a " + destinatario + ". Motivo del error: " + e.getMessage();
+        }
+    }
+    
+    @Tool("Envía un correo masivo (como avisos, comunicados o informes generales) a una lista de empleados. Lee los destinatarios desde un archivo de texto.")
+    public String enviarCorreoMasivo(
+            @P("El nombre exacto del archivo que contiene la lista de correos, ej: correos.txt") String nombreArchivo,
+            @P("Asunto corto y descriptivo del correo masivo") String asunto,
+            @P("Cuerpo del mensaje para todos. Puedes usar la etiqueta [Nombre] para que el sistema lo reemplace automáticamente por el nombre de cada empleado.") String cuerpo) {
+        
+        System.out.println("⚡ [TOOL CALLING RRHH] Iniciando envío masivo usando la lista: " + nombreArchivo);
+
+        String contenidoLista = leerArchivoSeguro(CARPETA_CONTACTOS, nombreArchivo);
+        
+        if (contenidoLista.startsWith("[Error]") || contenidoLista.startsWith("[Acceso Denegado]")) {
+            return "Fallo al leer la lista de correos: " + contenidoLista;
+        }
+
+        String[] lineas = contenidoLista.split("\\r?\\n");
+        int correosEnviados = 0;
+        int errores = 0;
+
+        for (String linea : lineas) {
+            if (linea.trim().isEmpty()) continue;
+
+            String[] partes = linea.trim().split("\\s+", 2);
+            String correoDestino = partes[0];
+            String nombreDestino = (partes.length > 1) ? partes[1] : "Compañero";
+
+            try {
+                SimpleMailMessage mensaje = new SimpleMailMessage();
+                mensaje.setTo(correoDestino);
+                mensaje.setSubject(asunto);
+                
+                String cuerpoPersonalizado = cuerpo.replace("[Nombre]", nombreDestino)
+                                                   .replace("[nombre]", nombreDestino);
+                
+                mensaje.setText(cuerpoPersonalizado);
+                mailSender.send(mensaje);
+                
+                System.out.println("  -> ✅ Enviado a: " + correoDestino + " (" + nombreDestino + ")");
+                correosEnviados++;
+                //borrar la siguiente linea después de pruebas
+                TimeUnit.SECONDS.sleep(15); // Pausa por 2 segundos
+                //borrar la anterior linea después de pruebas
+                
+            } catch (Exception e) {
+                System.out.println("  -> ❌ Error al enviar a " + correoDestino + ": " + e.getMessage());
+                errores++;
+            }
+        }
+
+        return "El envío masivo ha finalizado. Correos enviados exitosamente: " + correosEnviados + ". Errores: " + errores + ". Informa al usuario del resultado.";
     }
 
     // ==========================================
