@@ -16,7 +16,6 @@ import java.nio.file.Paths;
 @Component
 public class HerramientasRH {
 	
-    // Inyección del servicio de correos de Spring Boot
     @Autowired
     private JavaMailSender mailSender;
 
